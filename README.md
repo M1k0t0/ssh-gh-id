@@ -33,13 +33,29 @@ go build -o ssh-gh-id .
 
 This copies the current executable to `~/.local/bin/ssh-gh-id` and installs a scheduler.
 
-### Releases install
+### One-key install from the latest GitHub Release
 
-The intended release flow is to download a prebuilt binary from GitHub Releases and then run:
+Install the latest release with `curl`:
 
 ```bash
-ssh-gh-id -i
+ARCH="$(uname -m)"; case "$ARCH" in x86_64|amd64) ASSET="ssh-gh-id-linux-amd64" ;; aarch64|arm64) ASSET="ssh-gh-id-linux-arm64" ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac && \
+mkdir -p "$HOME/.local/bin" && \
+curl -fsSL -o "$HOME/.local/bin/ssh-gh-id" "https://github.com/M1k0t0/ssh-gh-id/releases/latest/download/${ASSET}" && \
+chmod +x "$HOME/.local/bin/ssh-gh-id" && \
+"$HOME/.local/bin/ssh-gh-id" -i
 ```
+
+Install the latest release with `wget`:
+
+```bash
+ARCH="$(uname -m)"; case "$ARCH" in x86_64|amd64) ASSET="ssh-gh-id-linux-amd64" ;; aarch64|arm64) ASSET="ssh-gh-id-linux-arm64" ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac && \
+mkdir -p "$HOME/.local/bin" && \
+wget -qO "$HOME/.local/bin/ssh-gh-id" "https://github.com/M1k0t0/ssh-gh-id/releases/latest/download/${ASSET}" && \
+chmod +x "$HOME/.local/bin/ssh-gh-id" && \
+"$HOME/.local/bin/ssh-gh-id" -i
+```
+
+If `~/.local/bin` is not already on your `PATH`, add it in your shell profile after installation.
 
 ### Uninstall
 
