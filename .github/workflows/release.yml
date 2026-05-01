@@ -5,12 +5,17 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing or new tag name to publish, for example v0.1.0'
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  build-release:
+  build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -50,10 +55,33 @@ jobs:
             dist/${{ matrix.asset }}
             dist/${{ matrix.asset }}.sha256
 
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve tag
+        id: meta
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
           files: |
-            dist/${{ matrix.asset }}
-            dist/${{ matrix.asset }}.sha256
+            dist/ssh-gh-id-linux-amd64
+            dist/ssh-gh-id-linux-amd64.sha256
+            dist/ssh-gh-id-linux-arm64
+            dist/ssh-gh-id-linux-arm64.sha256

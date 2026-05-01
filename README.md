@@ -35,7 +35,7 @@ This copies the current executable to `~/.local/bin/ssh-gh-id` and installs a sc
 
 ### Releases install
 
-以后更适合从 GitHub Releases 下载二进制，然后直接运行：
+The intended release flow is to download a prebuilt binary from GitHub Releases and then run:
 
 ```bash
 ssh-gh-id -i
@@ -56,17 +56,17 @@ ssh-gh-id --uninstall
 ## Usage
 
 ```bash
-ssh-gh-id --add <username>     # 或 -a <username>
-ssh-gh-id --del <username>     # 或 -d <username>
-ssh-gh-id --list               # 或 -l
-ssh-gh-id --update <username>  # 或 -u <username>
-ssh-gh-id --update-all         # 或 -U
-ssh-gh-id --set-interval <spec>  # 或 -t <spec>
-ssh-gh-id --install            # 或 -i
+ssh-gh-id --add <username>        # or -a <username>
+ssh-gh-id --del <username>        # or -d <username>
+ssh-gh-id --list                  # or -l
+ssh-gh-id --update <username>     # or -u <username>
+ssh-gh-id --update-all            # or -U
+ssh-gh-id --set-interval <spec>   # or -t <spec>
+ssh-gh-id --install               # or -i
 ssh-gh-id --uninstall
-ssh-gh-id --status             # 或 -s
-ssh-gh-id --version            # 或 -v
-ssh-gh-id --help               # 或 -h
+ssh-gh-id --status                # or -s
+ssh-gh-id --version               # or -v
+ssh-gh-id --help                  # or -h
 ```
 
 ### Common examples
@@ -86,19 +86,19 @@ ssh-gh-id -U
 List configured users:
 
 ```bash
-ssh-gh-id --list            # 或 -l
+ssh-gh-id --list
 ```
 
 Delete a user and remove their cached keys from the managed block:
 
 ```bash
-ssh-gh-id -d M1k0t0
+ssh-gh-id -d <username>
 ```
 
 Show status:
 
 ```bash
-ssh-gh-id --status          # 或 -s
+ssh-gh-id --status
 ```
 
 ## Interval formats
@@ -177,7 +177,7 @@ If something looks wrong:
 
 1. Check current status:
    ```bash
-   ssh-gh-id --status          # 或 -s
+   ssh-gh-id --status
    ```
 2. Inspect the log:
    ```bash
@@ -190,7 +190,7 @@ If something looks wrong:
 4. If needed, remove only the managed block from `authorized_keys` manually. Unmanaged entries can stay in place.
 5. If scheduler configuration is stale, rerun:
    ```bash
-   ssh-gh-id --install         # 或 -i
+   ssh-gh-id --install
    ```
 
 If you want to fully stop automation but keep your user list and cache, run:
