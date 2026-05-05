@@ -31,7 +31,7 @@ go build -o ssh-gh-id .
 ./ssh-gh-id -i
 ```
 
-This copies the current executable to `~/.local/bin/ssh-gh-id` and installs a scheduler.
+When you run `-i`, the install target directory is derived from the currently running `ssh-gh-id` binary on disk. In other words, if you run `/some/path/ssh-gh-id -i`, the managed install target becomes `/some/path/ssh-gh-id`. The scheduler and PATH helper follow that location.
 
 ### One-key install from the latest GitHub Release
 
@@ -55,7 +55,7 @@ chmod +x "$HOME/.local/bin/ssh-gh-id" && \
 "$HOME/.local/bin/ssh-gh-id" -i
 ```
 
-If `~/.local/bin` is not already on your `PATH`, add it in your shell profile after installation.
+If the installed binary directory is not already on your current `PATH`, `ssh-gh-id -i` will add a managed PATH block to your shell profile automatically. Open a new shell or source the profile file to pick it up in the current session.
 
 ### Uninstall
 

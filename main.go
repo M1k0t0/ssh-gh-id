@@ -27,6 +27,8 @@ const (
 	endMarker        = "# <<< ssh-gh-id managed block <<<"
 	cronStartMarker  = "# >>> ssh-gh-id managed cron >>>"
 	cronEndMarker    = "# <<< ssh-gh-id managed cron <<<"
+	pathStartMarker  = "# >>> ssh-gh-id managed path >>>"
+	pathEndMarker    = "# <<< ssh-gh-id managed path <<<"
 	defaultInterval  = "daily"
 	lockFilename     = "lock"
 	statusFilename   = "status.json"
@@ -180,6 +182,10 @@ func newApp() (*App, error) {
 	cacheDir := filepath.Join(stateDir, cacheDirname)
 	logDir := filepath.Join(stateDir, logsDirname)
 	authorizedKeysPath := firstNonEmpty(os.Getenv("SSH_GH_ID_AUTHORIZED_KEYS_PATH"), filepath.Join(home, ".ssh", "authorized_keys"))
+	installPath := defaultInstallPath(home)
+	if exe, err := os.Executable(); err == nil {
+		installPath = filepath.Join(filepath.Dir(exe), appName)
+	}
 
 	return &App{
 		Home:               home,
@@ -193,7 +199,7 @@ func newApp() (*App, error) {
 		LockPath:           filepath.Join(stateDir, lockFilename),
 		CacheDir:           cacheDir,
 		AuthorizedKeysPath: authorizedKeysPath,
-		LocalBinPath:       filepath.Join(home, ".local", "bin", appName),
+		LocalBinPath:       installPath,
 		SystemdDir:         filepath.Join(configHome, "systemd", "user"),
 		SystemdUnitPath:    filepath.Join(configHome, "systemd", "user", systemdUnitName),
 		SystemdTimerPath:   filepath.Join(configHome, "systemd", "user", systemdTimerName),
@@ -203,6 +209,10 @@ func newApp() (*App, error) {
 			Timeout: 20 * time.Second,
 		},
 	}, nil
+}
+
+func defaultInstallPath(home string) string {
+	return filepath.Join(home, ".local", "bin", appName)
 }
 
 func (a *App) run(args []string) error {
@@ -552,6 +562,10 @@ func (a *App) handleInstall() error {
 	if err := a.installBinary(); err != nil {
 		return err
 	}
+	profilePath, pathAdded, err := a.ensureLocalBinOnPath()
+	if err != nil {
+		return err
+	}
 	method, err := a.installScheduler(cfg.Interval)
 	if err != nil {
 		return err
@@ -569,9 +583,12 @@ func (a *App) handleInstall() error {
 	}
 	status.KeysInstalled, _ = a.countInstalledKeys()
 	_ = a.saveStatus(status)
-	pathMsg := infoText("~/.local/bin is already on your PATH")
-	if !pathContains(a.LocalBinPath) {
-		pathMsg = warnText("~/.local/bin is not on your PATH yet; add it in your shell profile")
+	binDir := filepath.Dir(a.LocalBinPath)
+	pathMsg := infoText(binDir + " is already on your PATH")
+	if pathAdded {
+		pathMsg = successText("added " + binDir + " to PATH in " + profilePath + " (open a new shell or source the file)")
+	} else if !pathContains(a.LocalBinPath) {
+		pathMsg = warnText(binDir + " is not on your current PATH, but a PATH block is already present in " + profilePath + "; open a new shell or source the file")
 	}
 	fmt.Printf("%s %s %s\n", successText("installed"), keyText(a.LocalBinPath), dimText("and scheduler ("+method+")"))
 	fmt.Println(pathMsg)
@@ -1316,6 +1333,72 @@ func pathContains(binPath string) bool {
 		}
 	}
 	return false
+}
+
+func (a *App) ensureLocalBinOnPath() (string, bool, error) {
+	profilePath := a.preferredShellProfile()
+	if err := os.MkdirAll(filepath.Dir(profilePath), 0o755); err != nil {
+		return profilePath, false, err
+	}
+	current, err := os.ReadFile(profilePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return profilePath, false, err
+	}
+	binDir := filepath.Dir(a.LocalBinPath)
+	exportLine := fmt.Sprintf("export PATH=%s:$PATH", shellEscape(binDir))
+	block := strings.Join([]string{
+		pathStartMarker,
+		exportLine,
+		pathEndMarker,
+	}, "\n") + "\n"
+	updated, changed, err := replaceManagedPathBlock(string(current), block)
+	if err != nil {
+		return profilePath, false, err
+	}
+	if !changed {
+		return profilePath, false, nil
+	}
+	if err := writeFileAtomic(profilePath, []byte(updated), 0o644); err != nil {
+		return profilePath, false, err
+	}
+	return profilePath, true, nil
+}
+
+func (a *App) preferredShellProfile() string {
+	shell := strings.ToLower(filepath.Base(os.Getenv("SHELL")))
+	switch shell {
+	case "zsh":
+		return filepath.Join(a.Home, ".zshrc")
+	case "bash":
+		return filepath.Join(a.Home, ".bashrc")
+	default:
+		return filepath.Join(a.Home, ".profile")
+	}
+}
+
+func replaceManagedPathBlock(current, block string) (string, bool, error) {
+	start := strings.Index(current, pathStartMarker)
+	end := strings.Index(current, pathEndMarker)
+	switch {
+	case start == -1 && end == -1:
+		if strings.TrimSpace(current) == "" {
+			return block, true, nil
+		}
+		trimmed := strings.TrimRight(current, "\n") + "\n\n" + block
+		return trimmed, true, nil
+	case start == -1 || end == -1 || end < start:
+		return "", false, fmt.Errorf("invalid managed PATH block in shell profile")
+	default:
+		end += len(pathEndMarker)
+		if end < len(current) && current[end] == '\n' {
+			end++
+		}
+		next := current[:start] + block + current[end:]
+		if next == current {
+			return current, false, nil
+		}
+		return next, true, nil
+	}
 }
 
 func usageText() string {
