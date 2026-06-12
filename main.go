@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	version          = "0.3.0"
+	version          = "0.3.1"
 	appName          = "ssh-gh-id"
 	startMarker      = "# >>> ssh-gh-id managed block >>>"
 	endMarker        = "# <<< ssh-gh-id managed block <<<"
@@ -37,7 +37,7 @@ const (
 	cacheDirname     = "cache"
 	logsDirname      = "logs"
 	logFilename      = "ssh-gh-id.log"
-	httpUserAgent    = "ssh-gh-id/0.3 (+https://github.com/)"
+	httpUserAgent    = "ssh-gh-id/0.3.1 (+https://github.com/)"
 	systemdUnitName  = "ssh-gh-id.service"
 	systemdTimerName = "ssh-gh-id.timer"
 )
