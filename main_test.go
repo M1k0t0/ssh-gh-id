@@ -64,7 +64,7 @@ func TestParseIntervalSpec(t *testing.T) {
 		cronSpec string
 	}{
 		{in: "daily", kind: intervalSystemdCalendar, cronSpec: "@daily"},
-		{in: "12h", kind: intervalSystemdDuration, cronSpec: ""},
+		{in: "12h", kind: intervalSystemdDuration, cronSpec: "0 */12 * * *"},
 		{in: "0 */6 * * *", kind: intervalCron, cronSpec: "0 */6 * * *"},
 	}
 	for _, tc := range cases {

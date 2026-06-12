@@ -78,6 +78,7 @@ func dimText(s string) string     { return colorize(ansiDim, s) }
 type Config struct {
 	AuthorizedKeysPath string `json:"authorized_keys_path"`
 	Interval           string `json:"interval"`
+	Scheduler          string `json:"scheduler"`
 }
 
 type UsersFile struct {
@@ -102,24 +103,27 @@ type Status struct {
 }
 
 type App struct {
-	Home               string
-	ConfigDir          string
-	DataDir            string
-	StateDir           string
-	ConfigPath         string
-	UsersPath          string
-	StatusPath         string
-	LogPath            string
-	LockPath           string
-	CacheDir           string
-	AuthorizedKeysPath string
-	LocalBinPath       string
-	SystemdDir         string
-	SystemdUnitPath    string
-	SystemdTimerPath   string
-	BaseURL            string
-	Now                func() time.Time
-	HTTPClient         *http.Client
+	Home                   string
+	ConfigDir              string
+	DataDir                string
+	StateDir               string
+	ConfigPath             string
+	UsersPath              string
+	StatusPath             string
+	LogPath                string
+	LockPath               string
+	CacheDir               string
+	AuthorizedKeysPath     string
+	LocalBinPath           string
+	SystemdDir             string
+	SystemdUnitPath        string
+	SystemdTimerPath       string
+	SystemSystemdDir       string
+	SystemSystemdUnitPath  string
+	SystemSystemdTimerPath string
+	BaseURL                string
+	Now                    func() time.Time
+	HTTPClient             *http.Client
 }
 
 type intervalKind string
@@ -188,23 +192,26 @@ func newApp() (*App, error) {
 	}
 
 	return &App{
-		Home:               home,
-		ConfigDir:          configDir,
-		DataDir:            dataDir,
-		StateDir:           stateDir,
-		ConfigPath:         filepath.Join(configDir, configFilename),
-		UsersPath:          filepath.Join(dataDir, usersFilename),
-		StatusPath:         filepath.Join(stateDir, statusFilename),
-		LogPath:            filepath.Join(logDir, logFilename),
-		LockPath:           filepath.Join(stateDir, lockFilename),
-		CacheDir:           cacheDir,
-		AuthorizedKeysPath: authorizedKeysPath,
-		LocalBinPath:       installPath,
-		SystemdDir:         filepath.Join(configHome, "systemd", "user"),
-		SystemdUnitPath:    filepath.Join(configHome, "systemd", "user", systemdUnitName),
-		SystemdTimerPath:   filepath.Join(configHome, "systemd", "user", systemdTimerName),
-		BaseURL:            strings.TrimRight(firstNonEmpty(os.Getenv("SSH_GH_ID_KEYS_BASE_URL"), "https://github.com"), "/"),
-		Now:                time.Now,
+		Home:                   home,
+		ConfigDir:              configDir,
+		DataDir:                dataDir,
+		StateDir:               stateDir,
+		ConfigPath:             filepath.Join(configDir, configFilename),
+		UsersPath:              filepath.Join(dataDir, usersFilename),
+		StatusPath:             filepath.Join(stateDir, statusFilename),
+		LogPath:                filepath.Join(logDir, logFilename),
+		LockPath:               filepath.Join(stateDir, lockFilename),
+		CacheDir:               cacheDir,
+		AuthorizedKeysPath:     authorizedKeysPath,
+		LocalBinPath:           installPath,
+		SystemdDir:             filepath.Join(configHome, "systemd", "user"),
+		SystemdUnitPath:        filepath.Join(configHome, "systemd", "user", systemdUnitName),
+		SystemdTimerPath:       filepath.Join(configHome, "systemd", "user", systemdTimerName),
+		SystemSystemdDir:       filepath.Join(string(filepath.Separator), "etc", "systemd", "system"),
+		SystemSystemdUnitPath:  filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdUnitName),
+		SystemSystemdTimerPath: filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdTimerName),
+		BaseURL:                strings.TrimRight(firstNonEmpty(os.Getenv("SSH_GH_ID_KEYS_BASE_URL"), "https://github.com"), "/"),
+		Now:                    time.Now,
 		HTTPClient: &http.Client{
 			Timeout: 20 * time.Second,
 		},
@@ -231,6 +238,7 @@ func (a *App) run(args []string) error {
 	updateAllShort := fs.Bool("U", false, "Update all configured GitHub usernames")
 	setInterval := fs.String("set-interval", "", "Set scheduler interval, for example daily, @hourly, 0 */6 * * *, 12h")
 	setIntervalShort := fs.String("t", "", "Set scheduler interval")
+	setScheduler := fs.String("set-scheduler", "", "Set scheduler backend: systemd, systemd-user, crontab, or auto")
 	install := fs.Bool("install", false, "Install the binary and scheduler")
 	installShort := fs.Bool("i", false, "Install the binary and scheduler")
 	uninstall := fs.Bool("uninstall", false, "Remove the scheduler and installed binary")
@@ -294,6 +302,7 @@ func (a *App) run(args []string) error {
 		*updateUser != "",
 		*updateAll,
 		*setInterval != "",
+		*setScheduler != "",
 		*install,
 		*uninstall,
 		*status,
@@ -325,6 +334,9 @@ func (a *App) run(args []string) error {
 
 	if *setInterval != "" {
 		return a.handleSetInterval(*setInterval)
+	}
+	if *setScheduler != "" {
+		return a.handleSetScheduler(*setScheduler)
 	}
 	if *install {
 		return a.handleInstall()
@@ -542,11 +554,41 @@ func (a *App) handleSetInterval(spec string) error {
 		return err
 	}
 	fmt.Printf("%s %s\n", successText("interval set to"), keyText(parsed.Original))
-	if a.detectScheduler() == "systemd-user" {
-		fmt.Println(infoText("scheduler is installed via systemd; run -i again to rewrite the timer"))
+	if a.detectScheduler() != "none" {
+		fmt.Println(infoText("scheduler is already installed; run -i again to rewrite it"))
 	}
-	if a.detectScheduler() == "cron" {
-		fmt.Println(infoText("scheduler is installed via cron; run -i again to rewrite the crontab entry"))
+	return nil
+}
+
+func (a *App) handleSetScheduler(name string) error {
+	scheduler := normalizeSchedulerName(name)
+	if !isValidScheduler(scheduler) {
+		return fmt.Errorf("unsupported scheduler %q; use systemd, systemd-user, crontab, or auto", name)
+	}
+	if err := a.ensureDirs(); err != nil {
+		return err
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.Scheduler = scheduler
+	if err := a.saveConfig(cfg); err != nil {
+		return err
+	}
+	fmt.Printf("%s %s\n", successText("scheduler set to"), keyText(scheduler))
+	switch scheduler {
+	case "systemd":
+		fmt.Println(infoText("systemd installs to /etc/systemd/system and requires root"))
+	case "systemd-user":
+		fmt.Println(warnText("systemd-user timers may stop after logout unless linger is enabled: loginctl enable-linger " + currentUsernameForHint()))
+	case "crontab":
+		fmt.Println(infoText("crontab uses the current user's crontab and does not require sudo"))
+	case "auto":
+		fmt.Println(infoText("auto uses systemd for root and crontab for non-root users"))
+	}
+	if a.detectScheduler() != "none" {
+		fmt.Println(infoText("run -i again to reinstall using the selected scheduler"))
 	}
 	return nil
 }
@@ -566,7 +608,7 @@ func (a *App) handleInstall() error {
 	if err != nil {
 		return err
 	}
-	method, err := a.installScheduler(cfg.Interval)
+	method, err := a.installScheduler(cfg.Interval, cfg.Scheduler)
 	if err != nil {
 		return err
 	}
@@ -648,7 +690,8 @@ func (a *App) handleStatus() error {
 	fmt.Printf("%s %s\n", dimText("state:"), a.StateDir)
 	fmt.Printf("%s %s\n", dimText("authorized_keys:"), cfg.AuthorizedKeysPath)
 	fmt.Printf("%s %s\n", dimText("interval:"), keyText(cfg.Interval))
-	fmt.Printf("%s %s\n", dimText("scheduler:"), keyText(a.detectScheduler()))
+	fmt.Printf("%s %s\n", dimText("scheduler-config:"), keyText(normalizeSchedulerName(cfg.Scheduler)))
+	fmt.Printf("%s %s\n", dimText("scheduler-installed:"), keyText(a.detectScheduler()))
 	fmt.Printf("%s %s\n", dimText("users:"), keyText(strconv.Itoa(len(users))))
 	if len(users) > 0 {
 		fmt.Printf("%s %s\n", dimText("user-list:"), strings.Join(users, ", "))
@@ -722,6 +765,9 @@ func (a *App) loadConfig() (Config, error) {
 	if cfg.Interval == "" {
 		cfg.Interval = defaultInterval
 	}
+	if cfg.Scheduler == "" {
+		cfg.Scheduler = "auto"
+	}
 	cfg.AuthorizedKeysPath = expandHome(cfg.AuthorizedKeysPath, a.Home)
 	return cfg, nil
 }
@@ -734,6 +780,7 @@ func (a *App) saveConfig(cfg Config) error {
 	if cfg.Interval == "" {
 		cfg.Interval = defaultInterval
 	}
+	cfg.Scheduler = normalizeSchedulerName(cfg.Scheduler)
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -1051,9 +1098,14 @@ func durationToCron(d time.Duration) string {
 		return "@weekly"
 	case 30 * 24 * time.Hour:
 		return "@monthly"
-	default:
-		return ""
 	}
+	if d > 0 && d < 24*time.Hour && d%time.Hour == 0 {
+		hours := int(d / time.Hour)
+		if 24%hours == 0 {
+			return fmt.Sprintf("0 */%d * * *", hours)
+		}
+	}
+	return ""
 }
 
 func isCronSpec(spec string) bool {
@@ -1087,50 +1139,57 @@ func (a *App) installBinary() error {
 	return writeReaderAtomic(a.LocalBinPath, input, 0o755)
 }
 
-func (a *App) installScheduler(spec string) (string, error) {
+func (a *App) installScheduler(spec string, scheduler string) (string, error) {
 	parsed, err := parseIntervalSpec(spec)
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(a.SystemdDir, 0o755); err != nil {
-		return "", err
-	}
-	if ok, err := a.systemdUserUsable(); err == nil && ok {
-		if parsed.Kind == intervalCron {
-			// If the user supplied native cron, keep it as cron even if systemd exists.
-			if err := a.installCron(parsed); err != nil {
-				return "", err
-			}
-			return "cron", nil
+	scheduler = normalizeSchedulerName(scheduler)
+	if scheduler == "auto" {
+		if runningAsRoot() {
+			scheduler = "systemd"
+		} else {
+			scheduler = "crontab"
 		}
-		if err := a.installSystemd(parsed); err != nil {
-			if parsed.CronSpec != "" {
-				if cronErr := a.installCron(parsed); cronErr == nil {
-					return "cron", nil
-				}
-			}
+	}
+
+	switch scheduler {
+	case "systemd":
+		if !runningAsRoot() {
+			return "", errors.New("systemd scheduler installs to /etc/systemd/system and requires root; use --set-scheduler crontab or --set-scheduler systemd-user")
+		}
+		if err := a.installSystemdSystem(parsed); err != nil {
 			return "", err
 		}
+		return "systemd", nil
+	case "systemd-user":
+		if err := os.MkdirAll(a.SystemdDir, 0o755); err != nil {
+			return "", err
+		}
+		if ok, err := a.systemdUserUsable(); err != nil {
+			return "", err
+		} else if !ok {
+			return "", errors.New("systemd --user is unavailable; use --set-scheduler crontab")
+		}
+		if err := a.installSystemdUser(parsed); err != nil {
+			return "", err
+		}
+		fmt.Println(warnText("systemd-user timers may stop after logout unless linger is enabled: loginctl enable-linger " + currentUsernameForHint()))
 		return "systemd-user", nil
+	case "crontab":
+		if parsed.CronSpec == "" {
+			return "", fmt.Errorf("interval %q cannot be expressed in crontab", spec)
+		}
+		if err := a.installCron(parsed); err != nil {
+			return "", err
+		}
+		return "crontab", nil
+	default:
+		return "", fmt.Errorf("unsupported scheduler %q; use systemd, systemd-user, crontab, or auto", scheduler)
 	}
-	if parsed.CronSpec == "" {
-		return "", fmt.Errorf("systemd --user unavailable and interval %q cannot be expressed in cron", spec)
-	}
-	if err := a.installCron(parsed); err != nil {
-		return "", err
-	}
-	return "cron", nil
 }
 
-func (a *App) installSystemd(parsed parsedInterval) error {
-	service := fmt.Sprintf(`[Unit]
-Description=Update SSH authorized_keys from GitHub identities
-
-[Service]
-Type=oneshot
-ExecStart=%s --update-all
-`, shellEscapePathForUnit(a.LocalBinPath))
-
+func renderSystemdTimer(parsed parsedInterval) (string, error) {
 	timer := &strings.Builder{}
 	fmt.Fprintln(timer, "[Unit]")
 	fmt.Fprintln(timer, "Description=Periodic SSH key refresh from GitHub")
@@ -1144,23 +1203,74 @@ ExecStart=%s --update-all
 	case intervalSystemdCalendar:
 		fmt.Fprintf(timer, "OnCalendar=%s\n", parsed.SystemdCalendar)
 	default:
-		return fmt.Errorf("interval %q is not supported by systemd install", parsed.Original)
+		return "", fmt.Errorf("interval %q is not supported by systemd install", parsed.Original)
 	}
 	fmt.Fprintln(timer, "RandomizedDelaySec=2min")
 	fmt.Fprintln(timer, "Unit=ssh-gh-id.service")
 	fmt.Fprintln(timer)
 	fmt.Fprintln(timer, "[Install]")
 	fmt.Fprintln(timer, "WantedBy=timers.target")
+	return timer.String(), nil
+}
 
+func (a *App) installSystemdUser(parsed parsedInterval) error {
+	service := fmt.Sprintf(`[Unit]
+Description=Update SSH authorized_keys from GitHub identities
+
+[Service]
+Type=oneshot
+ExecStart=%s --update-all
+`, shellEscapePathForUnit(a.LocalBinPath))
+
+	timer, err := renderSystemdTimer(parsed)
+	if err != nil {
+		return err
+	}
 	if err := writeFileAtomic(a.SystemdUnitPath, []byte(service), 0o644); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(a.SystemdTimerPath, []byte(timer.String()), 0o644); err != nil {
+	if err := writeFileAtomic(a.SystemdTimerPath, []byte(timer), 0o644); err != nil {
 		return err
 	}
 	cmds := [][]string{
 		{"systemctl", "--user", "daemon-reload"},
 		{"systemctl", "--user", "enable", "--now", systemdTimerName},
+	}
+	for _, parts := range cmds {
+		cmd := exec.Command(parts[0], parts[1:]...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%s: %w: %s", strings.Join(parts, " "), err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+func (a *App) installSystemdSystem(parsed parsedInterval) error {
+	if err := os.MkdirAll(a.SystemSystemdDir, 0o755); err != nil {
+		return err
+	}
+	service := fmt.Sprintf(`[Unit]
+Description=Update SSH authorized_keys from GitHub identities
+
+[Service]
+Type=oneshot
+ExecStart=%s --update-all
+`, shellEscapePathForUnit(a.LocalBinPath))
+
+	timer, err := renderSystemdTimer(parsed)
+	if err != nil {
+		return err
+	}
+	if err := writeFileAtomic(a.SystemSystemdUnitPath, []byte(service), 0o644); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(a.SystemSystemdTimerPath, []byte(timer), 0o644); err != nil {
+		return err
+	}
+	cmds := [][]string{
+		{"systemctl", "daemon-reload"},
+		{"systemctl", "enable", "--now", systemdTimerName},
 	}
 	for _, parts := range cmds {
 		cmd := exec.Command(parts[0], parts[1:]...)
@@ -1258,6 +1368,20 @@ func writeCrontab(content string) error {
 
 func (a *App) uninstallScheduler() error {
 	var merr multiError
+	if _, err := os.Stat(a.SystemSystemdTimerPath); err == nil && runningAsRoot() {
+		for _, parts := range [][]string{{"systemctl", "disable", "--now", systemdTimerName}, {"systemctl", "daemon-reload"}} {
+			cmd := exec.Command(parts[0], parts[1:]...)
+			out, err := cmd.CombinedOutput()
+			if err != nil && !strings.Contains(strings.ToLower(string(out)), "not loaded") {
+				merr.add("%s: %v: %s", strings.Join(parts, " "), err, strings.TrimSpace(string(out)))
+			}
+		}
+	}
+	for _, path := range []string{a.SystemSystemdTimerPath, a.SystemSystemdUnitPath} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			merr.add("remove %s: %v", path, err)
+		}
+	}
 	if ok, _ := a.systemdUserUsable(); ok {
 		for _, parts := range [][]string{{"systemctl", "--user", "disable", "--now", systemdTimerName}, {"systemctl", "--user", "daemon-reload"}} {
 			cmd := exec.Command(parts[0], parts[1:]...)
@@ -1289,6 +1413,47 @@ func (a *App) uninstallScheduler() error {
 	return merr.err()
 }
 
+func normalizeSchedulerName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "auto":
+		return "auto"
+	case "cron", "crontab", "user-cron", "cron-user":
+		return "crontab"
+	case "system", "systemd", "systemd-system":
+		return "systemd"
+	case "user", "systemd-user":
+		return "systemd-user"
+	default:
+		return strings.ToLower(strings.TrimSpace(name))
+	}
+}
+
+func isValidScheduler(name string) bool {
+	switch name {
+	case "auto", "systemd", "systemd-user", "crontab":
+		return true
+	default:
+		return false
+	}
+}
+
+func currentUsernameForHint() string {
+	if u := os.Getenv("USER"); u != "" {
+		return u
+	}
+	if u := os.Getenv("LOGNAME"); u != "" {
+		return u
+	}
+	if runningAsRoot() {
+		return "root"
+	}
+	return "$USER"
+}
+
+func runningAsRoot() bool {
+	return os.Geteuid() == 0
+}
+
 func (a *App) systemdUserUsable() (bool, error) {
 	cmd := exec.Command("systemctl", "--user", "show-environment")
 	out, err := cmd.CombinedOutput()
@@ -1303,11 +1468,14 @@ func (a *App) systemdUserUsable() (bool, error) {
 }
 
 func (a *App) detectScheduler() string {
+	if _, err := os.Stat(a.SystemSystemdTimerPath); err == nil {
+		return "systemd"
+	}
 	if _, err := os.Stat(a.SystemdTimerPath); err == nil {
 		return "systemd-user"
 	}
 	if cron, err := readCrontab(); err == nil && strings.Contains(cron, cronStartMarker) {
-		return "cron"
+		return "crontab"
 	}
 	return "none"
 }
@@ -1411,6 +1579,7 @@ func usageText() string {
 		"  ssh-gh-id --update <username>     " + dimText("(-u)"),
 		"  ssh-gh-id --update-all            " + dimText("(-U)"),
 		"  ssh-gh-id --set-interval <spec>   " + dimText("(-t)"),
+		"  ssh-gh-id --set-scheduler <backend> " + dimText("systemd | systemd-user | crontab | auto"),
 		"  ssh-gh-id --install               " + dimText("(-i)"),
 		"  ssh-gh-id --uninstall",
 		"  ssh-gh-id --status                " + dimText("(-s)"),
@@ -1421,6 +1590,7 @@ func usageText() string {
 		"  ssh-gh-id -a <username>",
 		"  ssh-gh-id -U",
 		"  ssh-gh-id -t daily",
+		"  ssh-gh-id --set-scheduler crontab",
 		"  ssh-gh-id --set-interval '0 */6 * * *'",
 		"  ssh-gh-id -i",
 	}, "\n") + "\n"
