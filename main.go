@@ -1148,8 +1148,12 @@ func (a *App) installScheduler(spec string, scheduler string) (string, error) {
 	if scheduler == "auto" {
 		if runningAsRoot() {
 			scheduler = "systemd"
-		} else {
+		} else if crontabAvailable() {
 			scheduler = "crontab"
+		} else if ok, _ := a.systemdUserUsable(); ok {
+			scheduler = "systemd-user"
+		} else {
+			return "", errors.New("crontab is not installed and systemd --user is unavailable; install cron/cronie or use --set-scheduler systemd-user after enabling user systemd")
 		}
 	}
 
@@ -1177,6 +1181,9 @@ func (a *App) installScheduler(spec string, scheduler string) (string, error) {
 		fmt.Println(warnText("systemd-user timers may stop after logout unless linger is enabled: loginctl enable-linger " + currentUsernameForHint()))
 		return "systemd-user", nil
 	case "crontab":
+		if !crontabAvailable() {
+			return "", errors.New("crontab executable not found in PATH; install cron/cronie or use --set-scheduler systemd-user")
+		}
 		if parsed.CronSpec == "" {
 			return "", fmt.Errorf("interval %q cannot be expressed in crontab", spec)
 		}
@@ -1435,6 +1442,11 @@ func isValidScheduler(name string) bool {
 	default:
 		return false
 	}
+}
+
+func crontabAvailable() bool {
+	_, err := exec.LookPath("crontab")
+	return err == nil
 }
 
 func currentUsernameForHint() string {
