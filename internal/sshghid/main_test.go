@@ -1,4 +1,4 @@
-package main
+package sshghid
 
 import (
 	"path/filepath"
