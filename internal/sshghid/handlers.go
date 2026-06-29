@@ -323,11 +323,11 @@ func (a *App) handleUninstall() error {
 }
 
 func (a *App) handleSelfUpdate() error {
-	unlock, err := a.acquireLock()
+	lock, err := a.acquireLockHandle()
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer lock.release()
 	result, err := a.selfUpdate(context.Background(), currentReleasePlatform())
 	if err != nil {
 		return err
@@ -335,7 +335,7 @@ func (a *App) handleSelfUpdate() error {
 	if !result.Updated {
 		return nil
 	}
-	if err := a.runUpdatedBinaryMigrations(result.PreviousVersion, result.NewVersion); err != nil {
+	if err := a.runUpdatedBinaryMigrations(result.PreviousVersion, result.NewVersion, lock); err != nil {
 		return err
 	}
 	return nil
@@ -345,17 +345,11 @@ func (a *App) handleRunMigrations(fromVersion, toVersion string) error {
 	if fromVersion == "" || toVersion == "" {
 		return errors.New("migration runner requires both source and target versions")
 	}
-	var unlock func()
-	if os.Getenv("SSH_GH_ID_PARENT_LOCK_HELD") != "1" {
-		var err error
-		unlock, err = a.acquireLock()
-		if err != nil {
-			return err
-		}
+	lock, err := a.acquireMigrationLock()
+	if err != nil {
+		return err
 	}
-	if unlock != nil {
-		defer unlock()
-	}
+	defer lock.release()
 	ran, err := a.runMigrations(fromVersion, toVersion)
 	if err != nil {
 		return err

@@ -203,7 +203,7 @@ func verifySHA256(content []byte, checksumText string) error {
 	return nil
 }
 
-func (a *App) runUpdatedBinaryMigrations(fromVersion, toVersion string) error {
+func (a *App) runUpdatedBinaryMigrations(fromVersion, toVersion string, lock *lockHandle) error {
 	cmp, err := compareVersions(fromVersion, toVersion)
 	if err != nil {
 		return err
@@ -216,7 +216,12 @@ func (a *App) runUpdatedBinaryMigrations(fromVersion, toVersion string) error {
 		return err
 	}
 	cmd := exec.Command(targetPath, "--run-migrations-from", fromVersion, "--run-migrations-to", toVersion)
-	cmd.Env = append(os.Environ(), "SSH_GH_ID_INTERNAL_MIGRATION=1", "SSH_GH_ID_PARENT_LOCK_HELD=1")
+	if lock != nil && lock.file != nil {
+		cmd.ExtraFiles = []*os.File{lock.file}
+		cmd.Env = append(os.Environ(), "SSH_GH_ID_INTERNAL_MIGRATION=1", "SSH_GH_ID_LOCK_FD=3")
+	} else {
+		cmd.Env = append(os.Environ(), "SSH_GH_ID_INTERNAL_MIGRATION=1")
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("run migrations with updated binary: %w: %s", err, strings.TrimSpace(string(out)))
