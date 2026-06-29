@@ -28,7 +28,7 @@ func (a *App) fetchKeys(ctx context.Context, username string) ([]string, error) 
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", httpUserAgent)
+	req.Header.Set("User-Agent", httpUserAgent())
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch %s: %w", username, err)

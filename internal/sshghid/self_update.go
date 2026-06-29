@@ -125,7 +125,7 @@ func (a *App) fetchLatestRelease(ctx context.Context) (githubRelease, error) {
 		return release, fmt.Errorf("build latest release request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", httpUserAgent)
+	req.Header.Set("User-Agent", httpUserAgent())
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		return release, fmt.Errorf("fetch latest release: %w", err)
@@ -149,7 +149,7 @@ func (a *App) downloadReleaseAsset(ctx context.Context, asset githubReleaseAsset
 	if err != nil {
 		return nil, fmt.Errorf("build download request for %s: %w", asset.Name, err)
 	}
-	req.Header.Set("User-Agent", httpUserAgent)
+	req.Header.Set("User-Agent", httpUserAgent())
 	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", asset.Name, err)

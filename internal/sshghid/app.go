@@ -128,6 +128,10 @@ func (a *App) acquireMigrationLock() (*lockHandle, error) {
 		_ = f.Close()
 		return nil, err
 	}
+	if err := a.requireExistingLockHolder(); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
@@ -151,6 +155,23 @@ func (a *App) validateLockFile(f *os.File) error {
 		return errors.New("inherited lock fd does not match ssh-gh-id lock file")
 	}
 	return nil
+}
+
+func (a *App) requireExistingLockHolder() error {
+	probe, err := os.OpenFile(a.LockPath, os.O_RDWR, 0)
+	if err != nil {
+		return fmt.Errorf("open lock probe: %w", err)
+	}
+	defer probe.Close()
+
+	if err := syscall.Flock(int(probe.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil
+		}
+		return fmt.Errorf("probe inherited lock state: %w", err)
+	}
+	_ = syscall.Flock(int(probe.Fd()), syscall.LOCK_UN)
+	return errors.New("inherited lock fd is not held by a parent self-update process")
 }
 
 func (l *lockHandle) release() {

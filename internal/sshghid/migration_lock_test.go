@@ -87,3 +87,25 @@ func TestHandleRunMigrationsRejectsWrongInheritedLockFD(t *testing.T) {
 		t.Fatalf("expected lock fd mismatch, got %v", err)
 	}
 }
+
+func TestHandleRunMigrationsRejectsUnlockedLockFD(t *testing.T) {
+	tmp := t.TempDir()
+	app := &App{
+		StateDir: filepath.Join(tmp, "state"),
+		LockPath: filepath.Join(tmp, "state", "lock"),
+	}
+	if err := os.MkdirAll(app.StateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unlocked, err := os.OpenFile(app.LockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlocked.Close()
+
+	t.Setenv("SSH_GH_ID_LOCK_FD", fmt.Sprint(unlocked.Fd()))
+	err = app.handleRunMigrations("0.3.1", "0.3.2")
+	if err == nil || !strings.Contains(err.Error(), "not held by a parent self-update process") {
+		t.Fatalf("expected unlocked fd rejection, got %v", err)
+	}
+}

@@ -1,7 +1,8 @@
 package sshghid
 
+var version = "0.3.1"
+
 const (
-	version          = "0.3.1"
 	appName          = "ssh-gh-id"
 	startMarker      = "# >>> ssh-gh-id managed block >>>"
 	endMarker        = "# <<< ssh-gh-id managed block <<<"
@@ -17,8 +18,11 @@ const (
 	cacheDirname     = "cache"
 	logsDirname      = "logs"
 	logFilename      = "ssh-gh-id.log"
-	httpUserAgent    = appName + "/" + version + " (+https://github.com/)"
 	releaseAPIURL    = "https://api.github.com/repos/M1k0t0/ssh-gh-id/releases/latest"
 	systemdUnitName  = "ssh-gh-id.service"
 	systemdTimerName = "ssh-gh-id.timer"
 )
+
+func httpUserAgent() string {
+	return appName + "/" + version + " (+https://github.com/)"
+}
