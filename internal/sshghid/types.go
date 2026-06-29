@@ -52,6 +52,7 @@ type App struct {
 	SystemSystemdUnitPath  string
 	SystemSystemdTimerPath string
 	BaseURL                string
+	ReleaseAPIURL          string
 	Now                    func() time.Time
 	HTTPClient             *http.Client
 }

@@ -12,7 +12,7 @@ It does **not** overwrite unmanaged keys outside the managed block.
 
 ## Features
 
-- CLI flags for add, delete, list, update, update-all, install, uninstall, interval changes, status, help, and version
+- CLI flags for add, delete, list, update, update-all, install, uninstall, self-update, interval changes, status, help, and version
 - XDG-style storage by default
   - config: `~/.config/ssh-gh-id/`
   - data: `~/.local/share/ssh-gh-id/`
@@ -80,6 +80,7 @@ ssh-gh-id --update-all            # or -U
 ssh-gh-id --set-interval <spec>   # or -t <spec>
 ssh-gh-id --install               # or -i
 ssh-gh-id --uninstall
+ssh-gh-id --self-update
 ssh-gh-id --status                # or -s
 ssh-gh-id --version               # or -v
 ssh-gh-id --help                  # or -h
@@ -116,6 +117,14 @@ Show status:
 ```bash
 ssh-gh-id --status
 ```
+
+Update the installed binary to the latest GitHub Release:
+
+```bash
+ssh-gh-id --self-update
+```
+
+`--self-update` currently supports the Linux release assets published by this project (`linux-amd64` and `linux-arm64`). It verifies the downloaded binary against the matching `.sha256` asset before replacing the installed binary.
 
 ## Interval formats
 

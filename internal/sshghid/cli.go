@@ -1,9 +1,11 @@
 package sshghid
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -27,12 +29,15 @@ func (a *App) run(args []string) error {
 	install := fs.Bool("install", false, "Install the binary and scheduler")
 	installShort := fs.Bool("i", false, "Install the binary and scheduler")
 	uninstall := fs.Bool("uninstall", false, "Remove the scheduler and installed binary")
+	selfUpdate := fs.Bool("self-update", false, "Update ssh-gh-id to the latest GitHub Release")
 	status := fs.Bool("status", false, "Show status")
 	statusShort := fs.Bool("s", false, "Show status")
 	showVersion := fs.Bool("version", false, "Show version")
 	showVersionShort := fs.Bool("v", false, "Show version")
 	help := fs.Bool("help", false, "Show help")
 	helpShort := fs.Bool("h", false, "Show help")
+	migrateFrom := fs.String("run-migrations-from", "", "")
+	migrateTo := fs.String("run-migrations-to", "", "")
 
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w\n\n%s", err, usageText())
@@ -74,6 +79,12 @@ func (a *App) run(args []string) error {
 		fmt.Print(usageText())
 		return nil
 	}
+	if *migrateFrom != "" || *migrateTo != "" {
+		if os.Getenv("SSH_GH_ID_INTERNAL_MIGRATION") != "1" {
+			return errors.New("migration runner is only available during self-update")
+		}
+		return a.handleRunMigrations(*migrateFrom, *migrateTo)
+	}
 	if *showVersion {
 		fmt.Println(keyText(version))
 		return nil
@@ -90,6 +101,7 @@ func (a *App) run(args []string) error {
 		*setScheduler != "",
 		*install,
 		*uninstall,
+		*selfUpdate,
 		*status,
 	} {
 		if active {
@@ -109,6 +121,9 @@ func (a *App) run(args []string) error {
 	}
 	if *status {
 		return a.handleStatus()
+	}
+	if *selfUpdate {
+		return a.handleSelfUpdate()
 	}
 
 	unlock, err := a.acquireLock()
@@ -157,6 +172,7 @@ func usageText() string {
 		"  ssh-gh-id --set-scheduler <backend> " + dimText("systemd | systemd-user | crontab | auto"),
 		"  ssh-gh-id --install               " + dimText("(-i)"),
 		"  ssh-gh-id --uninstall",
+		"  ssh-gh-id --self-update",
 		"  ssh-gh-id --status                " + dimText("(-s)"),
 		"  ssh-gh-id --version               " + dimText("(-v)"),
 		"  ssh-gh-id --help                  " + dimText("(-h)"),
@@ -168,6 +184,7 @@ func usageText() string {
 		"  ssh-gh-id --set-scheduler crontab",
 		"  ssh-gh-id --set-interval '0 */6 * * *'",
 		"  ssh-gh-id -i",
+		"  ssh-gh-id --self-update",
 	}, "\n") + "\n"
 	return header + body
 }

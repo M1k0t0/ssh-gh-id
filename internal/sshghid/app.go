@@ -51,6 +51,7 @@ func newApp() (*App, error) {
 		SystemSystemdUnitPath:  filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdUnitName),
 		SystemSystemdTimerPath: filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdTimerName),
 		BaseURL:                strings.TrimRight(firstNonEmpty(os.Getenv("SSH_GH_ID_KEYS_BASE_URL"), "https://github.com"), "/"),
+		ReleaseAPIURL:          firstNonEmpty(os.Getenv("SSH_GH_ID_RELEASE_API_URL"), releaseAPIURL),
 		Now:                    time.Now,
 		HTTPClient: &http.Client{
 			Timeout: 20 * time.Second,

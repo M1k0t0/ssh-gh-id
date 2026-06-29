@@ -322,6 +322,46 @@ func (a *App) handleUninstall() error {
 	return nil
 }
 
+func (a *App) handleSelfUpdate() error {
+	unlock, err := a.acquireLock()
+	if err != nil {
+		return err
+	}
+	result, err := a.selfUpdate(context.Background(), currentReleasePlatform())
+	unlock()
+	if err != nil {
+		return err
+	}
+	if !result.Updated {
+		return nil
+	}
+	if err := a.runUpdatedBinaryMigrations(result.PreviousVersion, result.NewVersion); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *App) handleRunMigrations(fromVersion, toVersion string) error {
+	if fromVersion == "" || toVersion == "" {
+		return errors.New("migration runner requires both source and target versions")
+	}
+	unlock, err := a.acquireLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	ran, err := a.runMigrations(fromVersion, toVersion)
+	if err != nil {
+		return err
+	}
+	if ran == 0 {
+		fmt.Printf("%s %s -> %s\n", dimText("no migrations needed"), keyText(fromVersion), keyText(toVersion))
+		return nil
+	}
+	fmt.Printf("%s %s -> %s\n", successText("migrations complete"), keyText(fromVersion), keyText(toVersion))
+	return nil
+}
+
 func (a *App) handleStatus() error {
 	if err := a.ensureDirs(); err != nil {
 		return err

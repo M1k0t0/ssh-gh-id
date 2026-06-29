@@ -17,7 +17,8 @@ const (
 	cacheDirname     = "cache"
 	logsDirname      = "logs"
 	logFilename      = "ssh-gh-id.log"
-	httpUserAgent    = "ssh-gh-id/0.3.1 (+https://github.com/)"
+	httpUserAgent    = appName + "/" + version + " (+https://github.com/)"
+	releaseAPIURL    = "https://api.github.com/repos/M1k0t0/ssh-gh-id/releases/latest"
 	systemdUnitName  = "ssh-gh-id.service"
 	systemdTimerName = "ssh-gh-id.timer"
 )
