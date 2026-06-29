@@ -27,7 +27,9 @@ func newApp() (*App, error) {
 	logDir := filepath.Join(stateDir, logsDirname)
 	authorizedKeysPath := firstNonEmpty(os.Getenv("SSH_GH_ID_AUTHORIZED_KEYS_PATH"), filepath.Join(home, ".ssh", "authorized_keys"))
 	installPath := defaultInstallPath(home)
+	executablePath := ""
 	if exe, err := os.Executable(); err == nil {
+		executablePath = exe
 		installPath = filepath.Join(filepath.Dir(exe), appName)
 	}
 
@@ -44,6 +46,7 @@ func newApp() (*App, error) {
 		CacheDir:               cacheDir,
 		AuthorizedKeysPath:     authorizedKeysPath,
 		LocalBinPath:           installPath,
+		ExecutablePath:         executablePath,
 		SystemdDir:             filepath.Join(configHome, "systemd", "user"),
 		SystemdUnitPath:        filepath.Join(configHome, "systemd", "user", systemdUnitName),
 		SystemdTimerPath:       filepath.Join(configHome, "systemd", "user", systemdTimerName),
@@ -51,7 +54,7 @@ func newApp() (*App, error) {
 		SystemSystemdUnitPath:  filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdUnitName),
 		SystemSystemdTimerPath: filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdTimerName),
 		BaseURL:                strings.TrimRight(firstNonEmpty(os.Getenv("SSH_GH_ID_KEYS_BASE_URL"), "https://github.com"), "/"),
-		ReleaseAPIURL:          firstNonEmpty(os.Getenv("SSH_GH_ID_RELEASE_API_URL"), releaseAPIURL),
+		ReleaseAPIURL:          releaseAPIURL,
 		Now:                    time.Now,
 		HTTPClient: &http.Client{
 			Timeout: 20 * time.Second,

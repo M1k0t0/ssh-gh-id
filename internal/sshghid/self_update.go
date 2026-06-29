@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -86,12 +87,35 @@ func (a *App) selfUpdate(ctx context.Context, platform releasePlatform) (selfUpd
 	if err := verifySHA256(binary, string(checksum)); err != nil {
 		return selfUpdateResult{}, err
 	}
-	if err := writeReaderAtomic(a.LocalBinPath, bytes.NewReader(binary), 0o755); err != nil {
-		return selfUpdateResult{}, fmt.Errorf("install update to %s: %w", a.LocalBinPath, err)
+	targetPath, err := a.selfUpdateTargetPath()
+	if err != nil {
+		return selfUpdateResult{}, err
+	}
+	if err := writeReaderAtomic(targetPath, bytes.NewReader(binary), 0o755); err != nil {
+		return selfUpdateResult{}, fmt.Errorf("install update to %s: %w", targetPath, err)
 	}
 	_ = a.logf("self-updated from %s to %s", version, release.TagName)
-	fmt.Printf("%s %s\n", successText("updated"), keyText(a.LocalBinPath))
+	fmt.Printf("%s %s\n", successText("updated"), keyText(targetPath))
 	return selfUpdateResult{Updated: true, PreviousVersion: version, NewVersion: release.TagName}, nil
+}
+
+func (a *App) selfUpdateTargetPath() (string, error) {
+	path := a.ExecutablePath
+	if path == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("resolve current executable: %w", err)
+		}
+		path = exe
+	}
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve absolute executable path %q: %w", path, err)
+		}
+		path = abs
+	}
+	return path, nil
 }
 
 func (a *App) fetchLatestRelease(ctx context.Context) (githubRelease, error) {
@@ -187,8 +211,12 @@ func (a *App) runUpdatedBinaryMigrations(fromVersion, toVersion string) error {
 	if cmp >= 0 {
 		return nil
 	}
-	cmd := exec.Command(a.LocalBinPath, "--run-migrations-from", fromVersion, "--run-migrations-to", toVersion)
-	cmd.Env = append(os.Environ(), "SSH_GH_ID_INTERNAL_MIGRATION=1")
+	targetPath, err := a.selfUpdateTargetPath()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(targetPath, "--run-migrations-from", fromVersion, "--run-migrations-to", toVersion)
+	cmd.Env = append(os.Environ(), "SSH_GH_ID_INTERNAL_MIGRATION=1", "SSH_GH_ID_PARENT_LOCK_HELD=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("run migrations with updated binary: %w: %s", err, strings.TrimSpace(string(out)))

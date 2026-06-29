@@ -327,8 +327,8 @@ func (a *App) handleSelfUpdate() error {
 	if err != nil {
 		return err
 	}
+	defer unlock()
 	result, err := a.selfUpdate(context.Background(), currentReleasePlatform())
-	unlock()
 	if err != nil {
 		return err
 	}
@@ -345,11 +345,17 @@ func (a *App) handleRunMigrations(fromVersion, toVersion string) error {
 	if fromVersion == "" || toVersion == "" {
 		return errors.New("migration runner requires both source and target versions")
 	}
-	unlock, err := a.acquireLock()
-	if err != nil {
-		return err
+	var unlock func()
+	if os.Getenv("SSH_GH_ID_PARENT_LOCK_HELD") != "1" {
+		var err error
+		unlock, err = a.acquireLock()
+		if err != nil {
+			return err
+		}
 	}
-	defer unlock()
+	if unlock != nil {
+		defer unlock()
+	}
 	ran, err := a.runMigrations(fromVersion, toVersion)
 	if err != nil {
 		return err

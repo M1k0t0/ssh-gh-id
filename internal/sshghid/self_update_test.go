@@ -66,17 +66,22 @@ func TestSelfUpdateDownloadsAndInstallsLatestRelease(t *testing.T) {
 
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "ssh-gh-id")
+	localBinPath := filepath.Join(tmp, "ssh-gh-id-local-bin")
 	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(localBinPath, []byte("local bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	app := &App{
-		Home:          tmp,
-		StateDir:      filepath.Join(tmp, "state"),
-		LogPath:       filepath.Join(tmp, "state", "logs", "ssh-gh-id.log"),
-		LocalBinPath:  target,
-		ReleaseAPIURL: "https://example.test/latest",
-		HTTPClient:    client,
-		Now:           func() time.Time { return time.Unix(0, 0).UTC() },
+		Home:           tmp,
+		StateDir:       filepath.Join(tmp, "state"),
+		LogPath:        filepath.Join(tmp, "state", "logs", "ssh-gh-id.log"),
+		LocalBinPath:   localBinPath,
+		ExecutablePath: target,
+		ReleaseAPIURL:  "https://example.test/latest",
+		HTTPClient:     client,
+		Now:            func() time.Time { return time.Unix(0, 0).UTC() },
 	}
 
 	result, err := app.selfUpdate(context.Background(), releasePlatform{GOOS: "linux", GOARCH: "amd64"})
@@ -95,6 +100,13 @@ func TestSelfUpdateDownloadsAndInstallsLatestRelease(t *testing.T) {
 	}
 	if string(got) != string(binary) {
 		t.Fatalf("installed binary=%q", got)
+	}
+	localBin, err := os.ReadFile(localBinPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(localBin) != "local bin" {
+		t.Fatalf("local bin path was unexpectedly updated: %q", localBin)
 	}
 	info, err := os.Stat(target)
 	if err != nil {

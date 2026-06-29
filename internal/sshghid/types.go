@@ -45,6 +45,7 @@ type App struct {
 	CacheDir               string
 	AuthorizedKeysPath     string
 	LocalBinPath           string
+	ExecutablePath         string
 	SystemdDir             string
 	SystemdUnitPath        string
 	SystemdTimerPath       string
