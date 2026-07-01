@@ -76,12 +76,51 @@ func (a *App) handleDelete(username string) error {
 		fmt.Printf("%s %s\n", warnText("not configured"), keyText(username))
 		return nil
 	}
-	if err := a.saveUsers(updated); err != nil {
+	keysUpdate, err := a.prepareAuthorizedKeysUpdate(updated, false)
+	if err != nil {
 		return err
 	}
-	_ = os.Remove(a.cachePath(username))
-	if err := a.applyAuthorizedKeys(updated, false); err != nil {
+	usersContent, err := marshalUsers(updated)
+	if err != nil {
 		return err
+	}
+	usersSnapshot, err := snapshotFile(a.UsersPath)
+	if err != nil {
+		return fmt.Errorf("snapshot users: %w", err)
+	}
+	if err := keysUpdate.commit(); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(a.UsersPath, usersContent, 0o644); err != nil {
+		var rollbackErrs multiError
+		if rollbackErr := usersSnapshot.restore(0o644); rollbackErr != nil {
+			rollbackErrs.add("rollback users: %v", rollbackErr)
+		}
+		if rollbackErr := keysUpdate.rollback(); rollbackErr != nil {
+			rollbackErrs.add("rollback authorized_keys: %v", rollbackErr)
+		}
+		if rollbackErr := rollbackErrs.err(); rollbackErr != nil {
+			return fmt.Errorf("save users after updating authorized_keys: %w; %v", err, rollbackErr)
+		}
+		return err
+	}
+	if err := os.Remove(a.cachePath(username)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		var rollbackErrs multiError
+		if rollbackErr := usersSnapshot.restore(0o644); rollbackErr != nil {
+			rollbackErrs.add("rollback users: %v", rollbackErr)
+		}
+		if rollbackErr := keysUpdate.rollback(); rollbackErr != nil {
+			rollbackErrs.add("rollback authorized_keys: %v", rollbackErr)
+		}
+		if rollbackErr := rollbackErrs.err(); rollbackErr != nil {
+			return fmt.Errorf("remove cache for %s: %w; %v", username, err, rollbackErr)
+		}
+		return fmt.Errorf("remove cache for %s: %w", username, err)
+	}
+	if keysUpdate.changed {
+		_ = a.logf("authorized_keys updated (%d managed keys)", keysUpdate.count)
+	} else {
+		_ = a.logf("authorized_keys unchanged (%d managed keys)", keysUpdate.count)
 	}
 	status := Status{
 		LastRunAt:      a.Now(),

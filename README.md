@@ -4,15 +4,16 @@
 
 It is intentionally narrow in scope:
 - stores a list of GitHub usernames
-- fetches each user's published SSH keys
+- fetches each user's published SSH keys from GitHub
+- validates fetched and cached SSH public keys before writing them
 - rewrites only its own managed block in `authorized_keys`
-- schedules periodic refreshes with `systemd --user` when available, otherwise `crontab`
+- schedules periodic refreshes with `systemd` or `crontab`
 
 It does **not** overwrite unmanaged keys outside the managed block.
 
 ## Features
 
-- CLI flags for add, delete, list, update, update-all, install, uninstall, self-update, interval changes, status, help, and version
+- CLI flags for add, delete, list, update, update-all, install, uninstall, self-update, interval changes, scheduler selection, status, help, and version
 - XDG-style storage by default
   - config: `~/.config/ssh-gh-id/`
   - data: `~/.local/share/ssh-gh-id/`
@@ -20,9 +21,16 @@ It does **not** overwrite unmanaged keys outside the managed block.
 - atomic writes for config, cache, and `authorized_keys`
 - file locking to avoid concurrent runs
 - cache-based updates so transient fetch failures do not automatically erase previously known keys
-- managed scheduler install with `systemd --user` preferred, `crontab` fallback
+- managed scheduler install with `systemd` for root, and `crontab` or `systemd --user` for non-root users
 
 ## Installation
+
+### Go install
+
+```bash
+go install github.com/M1k0t0/ssh-gh-id@latest
+ssh-gh-id -i
+```
 
 ### Local checkout
 
@@ -31,7 +39,9 @@ go build -o ssh-gh-id .
 ./ssh-gh-id -i
 ```
 
-When you run `-i`, the install target directory is derived from the currently running `ssh-gh-id` binary on disk. In other words, if you run `/some/path/ssh-gh-id -i`, the managed install target becomes `/some/path/ssh-gh-id`. The scheduler and PATH helper follow that location.
+When you run `-i` as a non-root user, the install target is derived from the currently running `ssh-gh-id` binary on disk. For example, running `/some/path/ssh-gh-id -i` installs the managed binary at `/some/path/ssh-gh-id`, and the scheduler/PATH helper follow that location.
+
+When you run `-i` as root, the install target is always the fixed root-owned path `/usr/local/bin/ssh-gh-id`. System-level `systemd` units point at that fixed path rather than at the directory where the installer was run.
 
 ### One-key install from the latest GitHub Release
 
@@ -55,6 +65,8 @@ chmod +x "$HOME/.local/bin/ssh-gh-id" && \
 "$HOME/.local/bin/ssh-gh-id" -i
 ```
 
+These convenience snippets trust GitHub Releases over HTTPS and execute the downloaded binary. If you need stronger provenance, download a pinned release plus its `.sha256` asset and verify it before running the binary.
+
 If the installed binary directory is not already on your current `PATH`, `ssh-gh-id -i` will add a managed PATH block to your shell profile automatically. Open a new shell or source the profile file to pick it up in the current session.
 
 ### Uninstall
@@ -69,21 +81,24 @@ or:
 ssh-gh-id --uninstall
 ```
 
+Root installs remove `/usr/local/bin/ssh-gh-id`.
+
 ## Usage
 
 ```bash
-ssh-gh-id --add <username>        # or -a <username>
-ssh-gh-id --del <username>        # or -d <username>
-ssh-gh-id --list                  # or -l
-ssh-gh-id --update <username>     # or -u <username>
-ssh-gh-id --update-all            # or -U
-ssh-gh-id --set-interval <spec>   # or -t <spec>
-ssh-gh-id --install               # or -i
+ssh-gh-id --add <username>          # or -a <username>
+ssh-gh-id --del <username>          # or -d <username>
+ssh-gh-id --list                    # or -l
+ssh-gh-id --update <username>       # or -u <username>
+ssh-gh-id --update-all              # or -U
+ssh-gh-id --set-interval <spec>     # or -t <spec>
+ssh-gh-id --set-scheduler <backend> # auto | systemd | systemd-user | crontab
+ssh-gh-id --install                 # or -i
 ssh-gh-id --uninstall
 ssh-gh-id --self-update
-ssh-gh-id --status                # or -s
-ssh-gh-id --version               # or -v
-ssh-gh-id --help                  # or -h
+ssh-gh-id --status                  # or -s
+ssh-gh-id --version                 # or -v
+ssh-gh-id --help                    # or -h
 ```
 
 ### Common examples
@@ -112,6 +127,14 @@ Delete a user and remove their cached keys from the managed block:
 ssh-gh-id -d <username>
 ```
 
+Set scheduler backend and interval, then reinstall the scheduler:
+
+```bash
+ssh-gh-id --set-scheduler crontab
+ssh-gh-id --set-interval '@hourly'
+ssh-gh-id -i
+```
+
 Show status:
 
 ```bash
@@ -124,7 +147,20 @@ Update the installed binary to the latest GitHub Release:
 ssh-gh-id --self-update
 ```
 
-`--self-update` currently supports the Linux release assets published by this project (`linux-amd64` and `linux-arm64`). It verifies the downloaded binary against the matching `.sha256` asset before replacing the installed binary.
+`--self-update` currently supports the Linux release assets published by this project (`linux-amd64` and `linux-arm64`). It downloads the matching binary and `.sha256` asset from the latest GitHub Release, verifies the binary against that checksum, then replaces the currently running executable path. This checksum check catches download mismatch/corruption; it does not protect against a compromised repository, maintainer account, workflow token, release asset, or checksum asset.
+
+## Scheduler behavior
+
+`--install` writes the managed binary and installs a scheduler using the configured interval and backend.
+
+Scheduler backend values:
+
+- `auto` — default. Root uses system-level `systemd`; non-root users prefer `crontab` when available, then fall back to `systemd --user` when usable.
+- `systemd` — writes `/etc/systemd/system/ssh-gh-id.service` and `.timer`; requires root.
+- `systemd-user` — writes user units under `$XDG_CONFIG_HOME/systemd/user`; may require linger (`loginctl enable-linger <user>`) to keep running after logout.
+- `crontab` — writes a managed block to the current user's crontab.
+
+After changing the interval or scheduler backend, rerun `ssh-gh-id -i` so the timer or crontab entry is rewritten.
 
 ## Interval formats
 
@@ -145,7 +181,7 @@ ssh-gh-id --set-interval '0 */6 * * *'
 ssh-gh-id --set-interval 12h
 ```
 
-If a scheduler is already installed, rerun `--install` after changing the interval so the timer or crontab entry is rewritten.
+Duration-style intervals are best suited for systemd timers. Some simple durations can be converted to cron; others require `systemd`/`systemd-user`.
 
 ## Managed block behavior
 
@@ -163,7 +199,7 @@ ssh-ed25519 BBBB...
 
 Anything outside that block is left alone.
 
-If a user has no cached keys yet, the block contains only a comment for that user until a successful fetch occurs.
+If a user has no cached keys yet, the block contains only a comment for that user until a successful fetch occurs. If `authorized_keys` contains incomplete or duplicate `ssh-gh-id` managed blocks, the tool fails loudly instead of guessing which block is authoritative; remove duplicate/corrupt managed blocks manually and rerun the command.
 
 ## Storage layout
 
@@ -182,17 +218,17 @@ Useful environment overrides:
 - `XDG_DATA_HOME`
 - `XDG_STATE_HOME`
 - `SSH_GH_ID_AUTHORIZED_KEYS_PATH`
-- `SSH_GH_ID_KEYS_BASE_URL` (primarily for testing)
 
 ## Trust model
 
-This tool trusts GitHub's `.keys` endpoint for every configured username.
+This tool trusts GitHub's `.keys` endpoint for every configured username. It does not support custom key-source endpoints from environment variables.
 
 That means:
-- if GitHub serves a new key for a configured account, the next refresh can add it
+- if GitHub serves a new valid public key for a configured account, the next refresh can add it
 - if GitHub stops serving a key, the next successful refresh can remove it from the managed block
 - a compromised GitHub account can publish attacker-controlled keys
 - network failures do not automatically delete previously cached keys, because refresh failures fall back to the last cached copy
+- fetched and cached key lines are parsed and validated as bare SSH public keys before they are written
 
 You should only configure GitHub accounts you intentionally trust for SSH access.
 
@@ -228,9 +264,17 @@ That removes the scheduler and installed binary, but leaves config/data/state fi
 
 ## Development
 
-Run tests and build locally:
+Run the full local check suite:
 
 ```bash
-go test ./...
-go build ./...
+make check
+```
+
+Useful individual commands:
+
+```bash
+make fmt
+make test
+make vet
+make build
 ```

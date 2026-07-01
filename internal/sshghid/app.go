@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -27,11 +26,11 @@ func newApp() (*App, error) {
 	cacheDir := filepath.Join(stateDir, cacheDirname)
 	logDir := filepath.Join(stateDir, logsDirname)
 	authorizedKeysPath := firstNonEmpty(os.Getenv("SSH_GH_ID_AUTHORIZED_KEYS_PATH"), filepath.Join(home, ".ssh", "authorized_keys"))
-	installPath := defaultInstallPath(home)
+	installPath := installPathFor(home, "", runningAsRoot())
 	executablePath := ""
 	if exe, err := os.Executable(); err == nil {
 		executablePath = exe
-		installPath = filepath.Join(filepath.Dir(exe), appName)
+		installPath = installPathFor(home, exe, runningAsRoot())
 	}
 
 	return &App{
@@ -54,7 +53,7 @@ func newApp() (*App, error) {
 		SystemSystemdDir:       filepath.Join(string(filepath.Separator), "etc", "systemd", "system"),
 		SystemSystemdUnitPath:  filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdUnitName),
 		SystemSystemdTimerPath: filepath.Join(string(filepath.Separator), "etc", "systemd", "system", systemdTimerName),
-		BaseURL:                strings.TrimRight(firstNonEmpty(os.Getenv("SSH_GH_ID_KEYS_BASE_URL"), "https://github.com"), "/"),
+		BaseURL:                githubKeysBaseURL,
 		ReleaseAPIURL:          releaseAPIURL,
 		Now:                    time.Now,
 		HTTPClient: &http.Client{
@@ -65,6 +64,16 @@ func newApp() (*App, error) {
 
 func defaultInstallPath(home string) string {
 	return filepath.Join(home, ".local", "bin", appName)
+}
+
+func installPathFor(home, executablePath string, isRoot bool) string {
+	if isRoot {
+		return rootInstallPath
+	}
+	if executablePath != "" {
+		return filepath.Join(filepath.Dir(executablePath), appName)
+	}
+	return defaultInstallPath(home)
 }
 
 type lockHandle struct {

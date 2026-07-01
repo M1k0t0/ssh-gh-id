@@ -29,6 +29,9 @@ func parseIntervalSpec(spec string) (parsedInterval, error) {
 	if raw == "" {
 		return parsedInterval{}, errors.New("interval cannot be empty")
 	}
+	if containsControlChar(raw) {
+		return parsedInterval{}, errors.New("interval cannot contain control characters")
+	}
 	lower := strings.ToLower(raw)
 	switch lower {
 	case "hourly", "@hourly":

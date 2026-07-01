@@ -91,10 +91,18 @@ func renderSystemdTimer(parsed parsedInterval) (string, error) {
 	fmt.Fprintln(timer, "Persistent=true")
 	switch parsed.Kind {
 	case intervalSystemdDuration:
+		duration, err := systemdUnitValue(parsed.SystemdDuration)
+		if err != nil {
+			return "", fmt.Errorf("invalid systemd duration %q: %w", parsed.SystemdDuration, err)
+		}
 		fmt.Fprintln(timer, "OnBootSec=2min")
-		fmt.Fprintf(timer, "OnUnitActiveSec=%s\n", parsed.SystemdDuration)
+		fmt.Fprintf(timer, "OnUnitActiveSec=%s\n", duration)
 	case intervalSystemdCalendar:
-		fmt.Fprintf(timer, "OnCalendar=%s\n", parsed.SystemdCalendar)
+		calendar, err := systemdUnitValue(parsed.SystemdCalendar)
+		if err != nil {
+			return "", fmt.Errorf("invalid systemd calendar %q: %w", parsed.SystemdCalendar, err)
+		}
+		fmt.Fprintf(timer, "OnCalendar=%s\n", calendar)
 	default:
 		return "", fmt.Errorf("interval %q is not supported by systemd install", parsed.Original)
 	}
@@ -107,14 +115,10 @@ func renderSystemdTimer(parsed parsedInterval) (string, error) {
 }
 
 func (a *App) installSystemdUser(parsed parsedInterval) error {
-	service := fmt.Sprintf(`[Unit]
-Description=Update SSH authorized_keys from GitHub identities
-
-[Service]
-Type=oneshot
-ExecStart=%s --update-all
-`, shellEscapePathForUnit(a.LocalBinPath))
-
+	service, err := renderSystemdService(a.LocalBinPath)
+	if err != nil {
+		return err
+	}
 	timer, err := renderSystemdTimer(parsed)
 	if err != nil {
 		return err
@@ -143,14 +147,10 @@ func (a *App) installSystemdSystem(parsed parsedInterval) error {
 	if err := os.MkdirAll(a.SystemSystemdDir, 0o755); err != nil {
 		return err
 	}
-	service := fmt.Sprintf(`[Unit]
-Description=Update SSH authorized_keys from GitHub identities
-
-[Service]
-Type=oneshot
-ExecStart=%s --update-all
-`, shellEscapePathForUnit(a.LocalBinPath))
-
+	service, err := renderSystemdService(a.LocalBinPath)
+	if err != nil {
+		return err
+	}
 	timer, err := renderSystemdTimer(parsed)
 	if err != nil {
 		return err
@@ -175,8 +175,46 @@ ExecStart=%s --update-all
 	return nil
 }
 
-func shellEscapePathForUnit(path string) string {
-	return strings.ReplaceAll(path, " ", `\x20`)
+func renderSystemdService(execPath string) (string, error) {
+	execArg, err := systemdExecPath(execPath)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(`[Unit]
+Description=Update SSH authorized_keys from GitHub identities
+
+[Service]
+Type=oneshot
+ExecStart=%s --update-all
+`, execArg), nil
+}
+
+func systemdExecPath(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("systemd ExecStart path cannot be empty")
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("systemd ExecStart path must be absolute: %s", path)
+	}
+	value, err := systemdUnitValue(path)
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func systemdUnitValue(value string) (string, error) {
+	if containsControlChar(value) {
+		return "", errors.New("systemd unit value contains a control character")
+	}
+	if strings.ContainsAny(value, "\"'") {
+		return "", errors.New("systemd unit value contains unsupported quote characters")
+	}
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "%", "%%")
+	value = strings.ReplaceAll(value, "$", "$$")
+	value = strings.ReplaceAll(value, " ", `\x20`)
+	return value, nil
 }
 
 func (a *App) installCron(parsed parsedInterval) error {

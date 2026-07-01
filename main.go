@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"ssh-gh-id/internal/sshghid"
+	"github.com/M1k0t0/ssh-gh-id/internal/sshghid"
 )
 
 func main() {
