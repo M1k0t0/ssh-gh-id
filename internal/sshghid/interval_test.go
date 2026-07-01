@@ -28,3 +28,9 @@ func TestParseIntervalSpec(t *testing.T) {
 		}
 	}
 }
+
+func TestParseIntervalSpecRejectsControlCharacters(t *testing.T) {
+	if _, err := parseIntervalSpec("daily\nUnit=evil.service"); err == nil {
+		t.Fatal("expected control-character rejection")
+	}
+}

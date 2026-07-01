@@ -77,6 +77,33 @@ func expandHome(path, home string) string {
 	return path
 }
 
+type fileSnapshot struct {
+	path    string
+	content []byte
+	exists  bool
+}
+
+func snapshotFile(path string) (fileSnapshot, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fileSnapshot{path: path}, nil
+		}
+		return fileSnapshot{}, err
+	}
+	return fileSnapshot{path: path, content: b, exists: true}, nil
+}
+
+func (s fileSnapshot) restore(fallbackMode os.FileMode) error {
+	if !s.exists {
+		if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	return writeFileAtomicWithExistingMode(s.path, s.content, fallbackMode)
+}
+
 func writeFileAtomic(path string, content []byte, mode os.FileMode) error {
 	return writeFileAtomicWithExistingMode(path, content, mode)
 }

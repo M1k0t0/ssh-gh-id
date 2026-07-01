@@ -42,5 +42,9 @@ func (a *App) fetchKeys(ctx context.Context, username string) ([]string, error) 
 	if err != nil {
 		return nil, fmt.Errorf("read %s keys: %w", username, err)
 	}
-	return lines, nil
+	keys, err := validateAndNormalizePublicKeyLines("github keys for "+username, lines)
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
 }

@@ -7,15 +7,58 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing or new tag name to publish, for example v0.1.0'
-        required: false
+        description: 'Existing tag name to publish, for example v0.1.0'
+        required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -eu
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ] && [ "$REF_TYPE" = "tag" ]; then
+            tag="$REF_NAME"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
+          fi
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
   build:
+    needs:
+      - meta
+      - test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -31,6 +74,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -42,18 +87,12 @@ jobs:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.meta.outputs.tag }}
         run: |
           mkdir -p dist
-          version="${{ github.event.inputs.tag }}"
-          if [ -z "$version" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            version="$GITHUB_REF_NAME"
-          fi
-          ldflags="-s -w"
-          if [ -n "$version" ]; then
-            ldflags="$ldflags -X ssh-gh-id/internal/sshghid.version=$version"
-          fi
+          ldflags="-s -w -X github.com/M1k0t0/ssh-gh-id/internal/sshghid.version=$VERSION"
           go build -trimpath -ldflags="$ldflags" -o "dist/${{ matrix.asset }}" .
-          sha256sum "dist/${{ matrix.asset }}" > "dist/${{ matrix.asset }}.sha256"
+          (cd dist && sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256")
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -64,9 +103,13 @@ jobs:
             dist/${{ matrix.asset }}.sha256
 
   release:
-    needs: build
+    needs:
+      - meta
+      - build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag != ''
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -74,19 +117,10 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Resolve tag
-        id: meta
-        run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
+          tag_name: ${{ needs.meta.outputs.tag }}
           generate_release_notes: true
           files: |
             dist/ssh-gh-id-linux-amd64

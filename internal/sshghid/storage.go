@@ -72,7 +72,7 @@ func (a *App) loadUsers() ([]string, error) {
 	for _, user := range uf.Users {
 		norm, err := normalizeUsername(user)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("invalid user %q in users file: %w", user, err)
 		}
 		if _, ok := seen[norm]; ok {
 			continue
@@ -85,14 +85,22 @@ func (a *App) loadUsers() ([]string, error) {
 }
 
 func (a *App) saveUsers(users []string) error {
+	b, err := marshalUsers(users)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(a.UsersPath, b, 0o644)
+}
+
+func marshalUsers(users []string) ([]byte, error) {
 	users = append([]string(nil), users...)
 	sort.Strings(users)
 	b, err := json.MarshalIndent(UsersFile{Users: users}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal users: %w", err)
+		return nil, fmt.Errorf("marshal users: %w", err)
 	}
 	b = append(b, '\n')
-	return writeFileAtomic(a.UsersPath, b, 0o644)
+	return b, nil
 }
 
 func (a *App) loadStatus() (Status, error) {
@@ -118,6 +126,11 @@ func (a *App) saveStatus(status Status) error {
 }
 
 func (a *App) saveCache(cache UserCache) error {
+	keys, err := validateAndNormalizePublicKeyLines("cache for "+cache.Username, cache.Keys)
+	if err != nil {
+		return err
+	}
+	cache.Keys = keys
 	b, err := json.MarshalIndent(cache, "", "  ")
 	if err != nil {
 		return err
@@ -135,6 +148,17 @@ func (a *App) loadCache(username string) (UserCache, error) {
 	if err := json.Unmarshal(b, &cache); err != nil {
 		return cache, err
 	}
+	if cache.Username == "" {
+		cache.Username = username
+	}
+	if cache.Username != username {
+		return cache, fmt.Errorf("cache username %q does not match %q", cache.Username, username)
+	}
+	keys, err := validateAndNormalizePublicKeyLines("cache for "+username, cache.Keys)
+	if err != nil {
+		return cache, err
+	}
+	cache.Keys = keys
 	return cache, nil
 }
 
